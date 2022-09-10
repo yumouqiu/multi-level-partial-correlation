@@ -1,0 +1,177 @@
+library(MASS)
+#library(genlasso)
+library(scalreg)
+
+QS = function(u){
+	if (u == 0) ker = 1
+	else ker = 25 * ( sin(6 * pi * u / 5) / (6 * pi * u / 5) - cos(6 * pi * u / 5) ) / (12 * pi^2 * u^2)
+	return(ker)
+}
+
+#--------------- Individual Graph ---------------
+
+individual = function(X, c0 = 0.1, tau = seq(0.5, 3, 0.01), MBT = 3000){
+n = dim(X)[1]; p = dim(X)[2]; smax = n / 2
+Mp = p * (p - 1) / 2; m = 1
+Eresidual = matrix(0, n, p)
+CoefMatrix = matrix(0, p, p - 1)
+meanX = colMeans(X)
+X = t(t(X) - meanX)
+XS = matrix(0, n, p)
+for (i in 1 : p){
+	XS[, i] = X[, i] / sd(X[, i])
+}
+
+TestAll = matrix(0, n, Mp)
+BTAll = matrix(0, n, Mp)
+recovery = diag(rep(1, p))
+
+lentau = length(tau)
+IndMatrix = matrix(1, p, p) - diag(rep(1, p))
+
+for (i in 1 : p){
+	out = scalreg(X = XS[, -i], y = X[, i], lam0 = sqrt(2 * 2.01 * log(p * (log(p))^(1.5) / sqrt(n)) / n))
+	Eresidual[, i] = out$residuals
+	CoefMatrix[i, ] = out$coefficients / apply(X[, -i], 2, sd)
+}
+CovRes = t(Eresidual) %*% Eresidual / n
+Est = matrix(1, p, p)
+
+for (i in 1 : (p - 1)){
+	for (j in (i + 1) : p){
+		temp = Eresidual[, i] * Eresidual[, j] + Eresidual[, i]^2 * CoefMatrix[j, i] + Eresidual[, j]^2 * CoefMatrix[i, j - 1]
+		TestAll[, m] = temp / sqrt(diag(CovRes)[i] * diag(CovRes)[j])
+		omegaHat = - mean(temp) / (diag(CovRes)[i] * diag(CovRes)[j])
+		BTAll[, m] = ( Eresidual[, i] * Eresidual[, j] + mean(temp) ) / sqrt(diag(CovRes)[i] * diag(CovRes)[j]) - omegaHat * sqrt(diag(CovRes)[j]) * ( Eresidual[, i]^2 - CovRes[i, i] ) / (2 * sqrt(diag(CovRes)[i]))  - omegaHat * sqrt(diag(CovRes)[i]) * ( Eresidual[, j]^2 - CovRes[j, j] ) / (2 * sqrt(diag(CovRes)[j]))
+		Est[i, j] = mean(temp) / sqrt(diag(CovRes)[i] * diag(CovRes)[j])
+		Est[j, i] = Est[i, j]
+      	m = m + 1
+	}
+}
+BTAllMean = colMeans(BTAll)
+BTAllcenter = t(t(BTAll) - BTAllMean)
+	
+NumAll = c()
+DenAll = c()
+for(i in 1 : Mp){
+	AR1 = ar(BTAllcenter[, i], aic = FALSE, order.max = 1)
+	rhoEst = AR1$ar
+	sigma2Est = AR1$var.pred
+	NumAll[i] = 4 * (rhoEst * sigma2Est)^2 / (1 - rhoEst)^8
+	DenAll[i] = sigma2Est^2 / (1 - rhoEst)^4
+}
+a2All = sum(NumAll) / sum(DenAll)
+bandwidthAll = 1.3221 * (a2All * n)^(0.2)
+BTcovAll = matrix(0, n, n)
+for (i in 1 : n){
+	for (j in 1 : n){
+		BTcovAll[i, j] = QS(abs(i - j) / bandwidthAll)
+	}
+}
+	
+BTAllsim = matrix(0, Mp, MBT)
+for (i in 1 : MBT){
+      temp = mvrnorm(1, rep(0, n), BTcovAll)
+      BTAllsim[, i] = (n)^(-0.5) * colSums(temp * BTAllcenter)
+}
+
+WdiagAllEmp = 0
+for (i in 1 : n){
+	WdiagAllEmp = WdiagAllEmp + BTAllcenter[i, ]^2
+}
+WdiagAllEmp = WdiagAllEmp / n
+TestAllstandard = WdiagAllEmp^(-1/2) * colMeans(TestAll)
+BTAllsim0 = WdiagAllEmp^(-1/2) * BTAllsim
+TestStat = sqrt(n) * max(abs(TestAllstandard))
+
+BTAllsim1 = c()
+for (i in 1 : MBT)
+{
+	BTAllsim1[i] = max(abs(BTAllsim0[, i]))
+}
+QAll = sort(BTAllsim1)[0.95 * MBT]
+
+#cat("iteration = ", c(1, TestStat, QAll), "\n")
+PCtemp = colMeans(TestAll)
+TPStemp = round(TestAllstandard, 5)
+PCmaxIndex0 = order(-abs(TPStemp))[1]
+PCmaxIndex = which(TPStemp %in% c(TPStemp[PCmaxIndex0], -TPStemp[PCmaxIndex0]))
+SignalID = c()	
+
+for (q in 1 : length(PCmaxIndex)){
+	SignalIDtemp1 = which(abs(Est - PCtemp[PCmaxIndex[q]]) == min(abs(Est - PCtemp[PCmaxIndex[q]])), arr.ind = TRUE)
+	SignalID = rbind(SignalID, SignalIDtemp1)
+	#cat("q = ", c(q, as.vector(SignalIDtemp1)), "\n")
+}
+
+MSignal = 1
+TestPro = colMeans(TestAll); BTPro = BTAllsim0; TestProstandard = TestAllstandard
+#QPro = QAll
+repeat{
+	TestPro = TestPro[-PCmaxIndex]
+	BTPro = BTPro[-PCmaxIndex, ]
+	TestProstandard = TestProstandard[-PCmaxIndex]
+	TestStatPro = sqrt(n) * max(abs(TestProstandard))
+
+	BTAllsimPro = c()
+	for (i in 1 : MBT)
+	{
+		BTAllsimPro[i] = max(abs(BTPro[, i]))
+	}
+	QPro = sort(BTAllsimPro)[0.95 * MBT]
+	
+	if (TestStatPro < QPro)	{break}
+	MSignal = MSignal + 1
+	#cat("iteration = ", c(MSignal, TestStatPro, QPro), "\n")
+	
+	PCtemp = TestPro
+	TPStemp = round(TestProstandard, 5)
+	PCmaxIndex0 = order(-abs(TPStemp))[1]
+	PCmaxIndex = which(TPStemp %in% c(TPStemp[PCmaxIndex0], -TPStemp[PCmaxIndex0]))
+	SignalIDtemp = c()
+	for (q in 1 : length(PCmaxIndex)){
+		SignalIDtemp1 = which(abs(Est - PCtemp[PCmaxIndex[q]]) == min(abs(Est - PCtemp[PCmaxIndex[q]])), arr.ind = TRUE)
+		SignalIDtemp = rbind(SignalIDtemp, SignalIDtemp1)
+		#cat("q = ", c(q, as.vector(SignalIDtemp1)), "\n")
+	}
+	SignalID = rbind(SignalID, SignalIDtemp)		
+}
+
+#cat(c(dim(SignalID)[1], length(unique(SignalID[, 1] * 1000 + SignalID[, 2]))), "\n")
+aug = ceiling(c0 * dim(SignalID)[1] / (2 * (1 - c0)))
+
+PCtemp = TestPro
+TPStemp = round(TestProstandard, 5)
+PCmaxIndex0 = order(-abs(TPStemp))[1 : aug]
+PCmaxIndex = which(TPStemp %in% c(TPStemp[PCmaxIndex0], -TPStemp[PCmaxIndex0]))
+SignalIDtemp = c()
+for (q in 1 : length(PCmaxIndex)){
+	SignalIDtemp1 = which(abs(Est - PCtemp[PCmaxIndex[q]]) == min(abs(Est - PCtemp[PCmaxIndex[q]])), arr.ind = TRUE)
+	SignalIDtemp = rbind(SignalIDtemp, SignalIDtemp1)
+	#cat("q = ", c(q, as.vector(SignalIDtemp1)), "\n")
+}
+SignalID = rbind(SignalID, SignalIDtemp)
+
+for (i in 1 : dim(SignalID)[1]){
+	index1 = SignalID[i, 1]; index2 = SignalID[i, 2]
+	recovery[index1, index2] = 1
+}
+
+#--------------- Liu 2013 -------------
+
+rejectLiu = c()
+for (i in 1 : lentau){
+	ThresholdLiu = tau[i] * sqrt(log(p) / n) * IndMatrix
+	SRecLiu = 1 * (abs(Est) > ThresholdLiu); NoNSRecLiu = 1 * (SRecLiu == 0)
+	rejectLiu = c(rejectLiu, max(1, (sum(SRecLiu) - p)))
+}
+
+FDPLiu = 2 * p * (p - 1) * ( 1 - pnorm( tau * sqrt(log(p)) ) ) / rejectLiu
+if (sum(FDPLiu <= 0.05) > 0) tauLiu = min(c(2, tau[FDPLiu <= 0.05]))
+else tauLiu = 2
+ThresholdLiu = tauLiu * sqrt(log(p) / n) * IndMatrix
+Liu = 1 * (abs(Est) > ThresholdLiu)
+
+return(cbind(recovery, Liu))
+}
+

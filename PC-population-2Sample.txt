@@ -1,0 +1,229 @@
+library(MASS)
+#library(genlasso)
+library(scalreg)
+
+QS = function(u){
+	if (u == 0) ker = 1
+	else ker = 25 * ( sin(6 * pi * u / 5) / (6 * pi * u / 5) - cos(6 * pi * u / 5) ) / (12 * pi^2 * u^2)
+	return(ker)
+}
+
+
+population2sample = function(Z1, Z2, c0 = 0.1, tau = seq(0.5, 3, 0.01), MBT = 3000){
+##Z1 is a n * p * MC1 dimensional array, where MC1 is number of subjects in group 1
+##Z2 is a n * p * MC2 dimensional array, where MC2 is number of subjects in group 2
+n = dim(Z1)[1]; p = dim(Z1)[2]; MC1 = dim(Z1)[3]; MC2 = dim(Z2)[3]; smax = n / 2
+lentau = length(tau)
+Mp = p * (p - 1) / 2
+IndMatrix = matrix(1, p, p) - diag(rep(1, p))
+
+CAll1 = array(dim = c(p, p, MC1))
+CAll2 = array(dim = c(p, p, MC2))
+EstVec1 = matrix(0, MC1, Mp)
+EstVec2 = matrix(0, MC2, Mp)
+recovery = matrix(0, p, p)
+
+for (sub in 1 : MC1){
+	X = Z1[, , sub]
+	m = 1
+	Eresidual = matrix(0, n, p)
+	CoefMatrix = matrix(0, p, p - 1)
+	meanX = colMeans(X)
+	X = t(t(X) - meanX)
+	XS = matrix(0, n, p)
+	for (i in 1 : p){
+		XS[, i] = X[, i] / sd(X[, i])
+	}
+
+	for (i in 1 : p){
+		out = scalreg(X = XS[, -i], y = X[, i], lam0 = sqrt(2 * 2.01 * log(p * (log(p))^(1.5) / sqrt(n)) / n))
+		Eresidual[, i] = out$residuals
+		CoefMatrix[i, ] = out$coefficients / apply(X[, -i], 2, sd)
+	}
+
+	CovRes = t(Eresidual) %*% Eresidual / n
+	Est = matrix(1, p, p)
+
+	indexN = c(((sub - 1) * n + 1) : (sub * n))
+	for (i in 1 : (p - 1)){
+		for (j in (i + 1) : p){
+			temp = Eresidual[, i] * Eresidual[, j] + Eresidual[, i]^2 * CoefMatrix[j, i] + Eresidual[, j]^2 * CoefMatrix[i, j - 1]
+			Est[i, j] = mean(temp) / sqrt(diag(CovRes)[i] * diag(CovRes)[j])
+			Est[j, i] = Est[i, j]
+			EstVec1[sub, m] = Est[i, j]
+      			m = m + 1
+		}
+	}
+	CAll1[, , sub] = Est
+}
+
+for (sub in 1 : MC2){
+	X = Z2[, , sub]
+	m = 1
+	Eresidual = matrix(0, n, p)
+	CoefMatrix = matrix(0, p, p - 1)
+	meanX = colMeans(X)
+	X = t(t(X) - meanX)
+	XS = matrix(0, n, p)
+	for (i in 1 : p){
+		XS[, i] = X[, i] / sd(X[, i])
+	}
+
+	for (i in 1 : p){
+		out = scalreg(X = XS[, -i], y = X[, i], lam0 = sqrt(2 * 2.01 * log(p * (log(p))^(1.5) / sqrt(n)) / n))
+		Eresidual[, i] = out$residuals
+		CoefMatrix[i, ] = out$coefficients / apply(X[, -i], 2, sd)
+	}
+
+	CovRes = t(Eresidual) %*% Eresidual / n
+	Est = matrix(1, p, p)
+
+	indexN = c(((sub - 1) * n + 1) : (sub * n))
+	for (i in 1 : (p - 1)){
+		for (j in (i + 1) : p){
+			temp = Eresidual[, i] * Eresidual[, j] + Eresidual[, i]^2 * CoefMatrix[j, i] + Eresidual[, j]^2 * CoefMatrix[i, j - 1]
+			Est[i, j] = mean(temp) / sqrt(diag(CovRes)[i] * diag(CovRes)[j])
+			Est[j, i] = Est[i, j]
+			EstVec2[sub, m] = Est[i, j]
+      			m = m + 1
+		}
+	}
+	CAll2[, , sub] = Est
+}
+
+#--------------- Population Graph (Proposed method) ---------------
+
+EstVecCenter1 = t(t(EstVec1) - colMeans(EstVec1))
+EstVecCenter2 = t(t(EstVec2) - colMeans(EstVec2))
+EstAll1 = apply(CAll1, c(1, 2), mean)
+EstAll2 = apply(CAll2, c(1, 2), mean)
+SdAll1 = apply(CAll1, c(1, 2), sd)
+SdAll2 = apply(CAll2, c(1, 2), sd)
+#EstVar = colMeans(EstVec^2) - colMeans(EstVec)^2
+#TestAllstandard = EstVar^(-1/2) * colMeans(EstVec)
+TestAllstandard1 = colMeans(EstVec1)
+TestAllstandard2 = colMeans(EstVec2)
+TestStat = sqrt(MC1) * max(abs(TestAllstandard1 - TestAllstandard2))
+
+BTAllsim = matrix(0, Mp, MBT)
+for (i in 1 : MBT){
+      temp1 = rnorm(MC1)
+      temp2 = rnorm(MC2)
+      BTAllsim[, i] = (MC1)^(-0.5) * colSums(temp1 * EstVecCenter1) - (MC1)^(0.5) * colMeans(temp2 * EstVecCenter2)
+}
+#BTAllsimstandard = EstVar^(-1/2) * BTAllsim
+BTAllsimstandard = BTAllsim
+
+BTsim = c()
+for (i in 1 : MBT)
+{
+	BTsim[i] = max(abs(BTAllsimstandard[, i]))
+}
+QAll = sort(BTsim)[0.95 * MBT]
+
+PCtemp = TestAllstandard1 - TestAllstandard2
+EstAll = EstAll1 - EstAll2
+TPStemp = round(TestAllstandard1 - TestAllstandard2, 5)
+PCmaxIndex0 = order(-abs(TPStemp))[1]
+PCmaxIndex = which(TPStemp %in% c(TPStemp[PCmaxIndex0], -TPStemp[PCmaxIndex0]))
+SignalID = c()	
+
+for (q in 1 : length(PCmaxIndex)){
+	SignalIDtemp1 = which(abs(EstAll - PCtemp[PCmaxIndex[q]]) == min(abs(EstAll - PCtemp[PCmaxIndex[q]])), arr.ind = TRUE)
+	SignalID = rbind(SignalID, SignalIDtemp1)
+	#cat("q = ", c(q, as.vector(SignalIDtemp1)), "\n")
+}
+
+MSignal = 1
+TestPro = TestAllstandard1 - TestAllstandard2; BTPro = BTAllsimstandard; TestProstandard = TestAllstandard1 - TestAllstandard2
+#QPro = QAll
+repeat{
+	TestPro = TestPro[-PCmaxIndex]
+	BTPro = BTPro[-PCmaxIndex, ]
+	TestProstandard = TestProstandard[-PCmaxIndex]
+	TestStatPro = sqrt(MC1) * max(abs(TestProstandard))
+
+	BTAllsimPro = c()
+	for (i in 1 : MBT)
+	{
+		BTAllsimPro[i] = max(abs(BTPro[, i]))
+	}
+	QPro = sort(BTAllsimPro)[0.95 * MBT]
+	
+	if (TestStatPro < QPro)	{break}
+	MSignal = MSignal + 1
+	#cat("iteration = ", c(MSignal, TestStatPro, QPro), "\n")
+	
+	PCtemp = TestPro
+	TPStemp = round(TestProstandard, 5)
+	PCmaxIndex0 = order(-abs(TPStemp))[1]
+	PCmaxIndex = which(TPStemp %in% c(TPStemp[PCmaxIndex0], -TPStemp[PCmaxIndex0]))
+	SignalIDtemp = c()
+	for (q in 1 : length(PCmaxIndex)){
+		SignalIDtemp1 = which(abs(EstAll - PCtemp[PCmaxIndex[q]]) == min(abs(EstAll - PCtemp[PCmaxIndex[q]])), arr.ind = TRUE)
+		SignalIDtemp = rbind(SignalIDtemp, SignalIDtemp1)
+		#cat("q = ", c(q, as.vector(SignalIDtemp1)), "\n")
+	}
+	SignalID = rbind(SignalID, SignalIDtemp)		
+}
+
+#cat(c(dim(SignalID)[1], length(unique(SignalID[, 1] * 1000 + SignalID[, 2]))), "\n")
+aug = ceiling(c0 * dim(SignalID)[1] / 2)
+
+PCtemp = TestPro
+TPStemp = round(TestProstandard, 5)
+PCmaxIndex0 = order(-abs(TPStemp))[1 : aug]
+PCmaxIndex = which(TPStemp %in% c(TPStemp[PCmaxIndex0], -TPStemp[PCmaxIndex0]))
+SignalIDtemp = c()
+for (q in 1 : length(PCmaxIndex)){
+	SignalIDtemp1 = which(abs(EstAll - PCtemp[PCmaxIndex[q]]) == min(abs(EstAll - PCtemp[PCmaxIndex[q]])), arr.ind = TRUE)
+	SignalIDtemp = rbind(SignalIDtemp, SignalIDtemp1)
+	#cat("q = ", c(q, as.vector(SignalIDtemp1)), "\n")
+}
+SignalID = rbind(SignalID, SignalIDtemp)
+
+ResC = SignalID
+for (i in 1 : dim(SignalID)[1]){
+	index1 = SignalID[i, 1]; index2 = SignalID[i, 2]
+	recovery[index1, index2] = 1
+}
+
+
+#--------------- Liu 2013 -------------
+
+EstT = EstAll / sqrt(SdAll1^2 / MC1 + SdAll2^2 / MC2 + 10^(-6))
+rejectLiu = c()
+for (i in 1 : lentau){
+	ThresholdLiu = tau[i] * sqrt(log(p)) * IndMatrix
+	SRecLiu = 1 * (abs(EstT) > ThresholdLiu); NoNSRecLiu = 1 * (SRecLiu == 0)
+	rejectLiu = c(rejectLiu, max(1, (sum(SRecLiu) - p)))
+}
+
+FDPLiu = 2 * p * (p - 1) * ( 1 - pnorm( tau * sqrt(log(p)) ) ) / rejectLiu
+if (sum(FDPLiu <= 0.05) > 0) tauLiu = min(c(2, tau[FDPLiu <= 0.05]))
+if (sum(FDPLiu <= 0.05) == 0) tauLiu = 2
+ThresholdLiu = tauLiu * sqrt(log(p)) * IndMatrix
+Liu = 1 * (abs(EstT) > ThresholdLiu)
+
+#--------------- Minimum pvalue on EstAll -------------
+
+pv = c()
+Beta = c()
+record = 1
+pv0 = 2 * (1 - pnorm(abs(EstT)))
+for(i in 1 : (p - 1)){
+	for (j in (i + 1) : p){
+		pv[record] = pv0[i, j]
+		Beta[record] = qbeta(0.05, 1, Mp - record + 1)
+		record = record + 1
+	}
+}
+pv1 = sort(pv)
+a0 = order((-1) * (pv1 > Beta))[1]
+a1 = ceiling((1 + c0) * a0)
+pvThreshold = pv1[a1]
+MinPv = 1 * (pv0 < pvThreshold)
+
+return(cbind(recovery, Liu, MinPv))
+}
+
