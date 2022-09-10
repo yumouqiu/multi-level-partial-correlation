@@ -9,3 +9,5 @@ The output *cbind(recovery, Liu)* is two p by p binary (0-1) matrices combining 
 The output *cbind(recovery, Liu, MinPv)* is three p by p binary (0-1) matrices combining together by columns, with 1 and 0 indicating significant nonzero and zero population level partial correlations, respectively. Here, *recovery* is the output of the proposed method, and *Liu* and *MinPv* are the outputs from two existing multiple testing procedures based on subject level estimated partial correlations. 
 
 **PC-population-2Sample.txt** provides the function *population2sample(Z1, Z2, ...)* to test for the differences of population level partial correlation matrices from two groups. The input and output are similar to *population(Z, ...)* for the one-sample case.
+
+The folder *simulation* provides the simualtion codes.
