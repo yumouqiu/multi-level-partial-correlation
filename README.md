@@ -10,4 +10,4 @@ The output *cbind(recovery, Liu, MinPv)* is three p by p binary (0-1) matrices c
 
 **PC-population-2Sample.txt** provides the function *population2sample(Z1, Z2, ...)* to test for the differences of population level partial correlation matrices from two groups. The input and output are similar to *population(Z, ...)* for the one-sample case.
 
-The folder *simulation* provides the simualtion codes.
+The folder **simulation** provides the simualtion codes.
